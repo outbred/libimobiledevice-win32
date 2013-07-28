@@ -20,84 +20,9 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA 
  */
 
-#include <stdio.h>
-#include <string.h>
-#include <errno.h>
-#include <stdlib.h>
-#include <signal.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <libgen.h>
-#include <ctype.h>
-#include <time.h>
+#include "idevicebackup2.h"
 
-#include <libimobiledevice/libimobiledevice.h>
-#include <libimobiledevice/lockdown.h>
-#include <libimobiledevice/mobilebackup2.h>
-#include <libimobiledevice/notification_proxy.h>
-#include <libimobiledevice/afc.h>
-
-#include <endianness.h>
-
-#define MOBILEBACKUP2_SERVICE_NAME "com.apple.mobilebackup2"
-#define NP_SERVICE_NAME "com.apple.mobile.notification_proxy"
-
-#define LOCK_ATTEMPTS 50
-#define LOCK_WAIT 200000
-
-#ifdef WIN32
-#include <windows.h>
-#include <conio.h>
-#include <direct.h>
-#define sleep(x) Sleep(x*1000)
-#else
-#include <termios.h>
-#include <sys/statvfs.h>
-#endif
-
-#ifndef __func__
-# define __func__ __FUNCTION__
-#endif
-
-#define CODE_SUCCESS 0x00
-#define CODE_ERROR_LOCAL 0x06
-#define CODE_ERROR_REMOTE 0x0b
-#define CODE_FILE_DATA 0x0c
-
-static int verbose = 1;
-static int quit_flag = 0;
-
-#define PRINT_VERBOSE(min_level, ...) if (verbose >= min_level) { printf(__VA_ARGS__); };
-
-enum cmd_mode {
-	CMD_BACKUP,
-	CMD_RESTORE,
-	CMD_INFO,
-	CMD_LIST,
-	CMD_UNBACK,
-	CMD_CHANGEPW,
-	CMD_LEAVE
-};
-
-enum plist_format_t {
-	PLIST_FORMAT_XML,
-	PLIST_FORMAT_BINARY
-};
-
-enum cmd_flags {
-	CMD_FLAG_RESTORE_SYSTEM_FILES       = (1 << 1),
-	CMD_FLAG_RESTORE_REBOOT             = (1 << 2),
-	CMD_FLAG_RESTORE_COPY_BACKUP        = (1 << 3),
-	CMD_FLAG_RESTORE_SETTINGS           = (1 << 4),
-	CMD_FLAG_RESTORE_REMOVE_ITEMS       = (1 << 5),
-	CMD_FLAG_ENCRYPTION_ENABLE          = (1 << 6),
-	CMD_FLAG_ENCRYPTION_DISABLE         = (1 << 7),
-	CMD_FLAG_ENCRYPTION_CHANGEPW        = (1 << 8)
-};
-
-static int backup_domain_changed = 0;
-
-static void notify_cb(const char *notification, void *userdata)
+void notify_cb(const char *notification, void *userdata)
 {
 	if (!strcmp(notification, NP_SYNC_CANCEL_REQUEST)) {
 		PRINT_VERBOSE(1, "User has cancelled the backup process on the device.\n");
@@ -184,7 +109,7 @@ static char *str_toupper(char* str)
 	return res;
 }
 
-static int __mkdir(const char* path, int mode)
+int __mkdir(const char* path, int mode)
 {
 #ifdef WIN32
 	return _mkdir(path);
@@ -216,7 +141,7 @@ static int mkdir_with_parents(const char *dir, int mode)
 	return res;
 }
 
-static char* build_path(const char* elem, ...)
+char* build_path(const char* elem, ...)
 {
 	if (!elem) return NULL;
 	va_list args;
@@ -262,7 +187,7 @@ static char* format_size_for_display(uint64_t size)
 	return strdup(buf);
 }
 
-static plist_t mobilebackup_factory_info_plist_new(const char* udid, lockdownd_client_t lockdown, afc_client_t afc)
+plist_t mobilebackup_factory_info_plist_new(const char* udid, lockdownd_client_t lockdown, afc_client_t afc)
 {
 	/* gather data from lockdown */
 	plist_t value_node = NULL;
@@ -410,7 +335,7 @@ static void buffer_write_to_filename(const char *filename, const char *buffer, u
 	}
 }
 
-static int plist_read_from_filename(plist_t *plist, const char *filename)
+int plist_read_from_filename(plist_t *plist, const char *filename)
 {
 	char *buffer = NULL;
 	uint64_t length;
@@ -435,7 +360,7 @@ static int plist_read_from_filename(plist_t *plist, const char *filename)
 	return 1;
 }
 
-static int plist_write_to_filename(plist_t plist, const char *filename, enum plist_format_t format)
+int plist_write_to_filename(plist_t plist, const char *filename, enum plist_format_t format)
 {
 	char *buffer = NULL;
 	uint32_t length;
@@ -457,7 +382,7 @@ static int plist_write_to_filename(plist_t plist, const char *filename, enum pli
 	return 1;
 }
 
-static int mb2_status_check_snapshot_state(const char *path, const char *udid, const char *matches)
+int mb2_status_check_snapshot_state(const char *path, const char *udid, const char *matches)
 {
 	int ret = -1;
 	plist_t status_plist = NULL;
@@ -484,7 +409,7 @@ static int mb2_status_check_snapshot_state(const char *path, const char *udid, c
 	return ret;
 }
 
-static void do_post_notification(idevice_t device, const char *notification)
+void do_post_notification(idevice_t device, const char *notification)
 {
 	lockdownd_service_descriptor_t service = NULL;
 	np_client_t np;
@@ -595,7 +520,7 @@ static void mb2_multi_status_add_file_error(plist_t status_dict, const char *pat
 	plist_dict_insert_item(status_dict, path, filedict);
 }
 
-static int errno_to_device_error(int errno_value)
+int errno_to_device_error(int errno_value)
 {
 	switch (errno_value) {
 		case ENOENT:
@@ -608,7 +533,7 @@ static int errno_to_device_error(int errno_value)
 }
 
 #ifdef WIN32
-static int win32err_to_errno(int err_value)
+int win32err_to_errno(int err_value)
 {
 	switch (err_value) {
 		case ERROR_FILE_NOT_FOUND:
@@ -760,7 +685,7 @@ leave_proto_err:
 	return result;
 }
 
-static void mb2_handle_send_files(mobilebackup2_client_t mobilebackup2, plist_t message, const char *backup_dir)
+void mb2_handle_send_files(mobilebackup2_client_t mobilebackup2, plist_t message, const char *backup_dir)
 {
 	uint32_t cnt; 
 	uint32_t i = 0;
@@ -852,7 +777,7 @@ static int mb2_receive_filename(mobilebackup2_client_t mobilebackup2, char** fil
 	return nlen;
 }
 
-static int mb2_handle_receive_files(mobilebackup2_client_t mobilebackup2, plist_t message, const char *backup_dir)
+int mb2_handle_receive_files(mobilebackup2_client_t mobilebackup2, plist_t message, const char *backup_dir)
 {
 	uint64_t backup_real_size = 0;
 	uint64_t backup_total_size = 0;
@@ -1018,7 +943,7 @@ static int mb2_handle_receive_files(mobilebackup2_client_t mobilebackup2, plist_
 	return file_count;
 }
 
-static void mb2_handle_list_directory(mobilebackup2_client_t mobilebackup2, plist_t message, const char *backup_dir)
+void mb2_handle_list_directory(mobilebackup2_client_t mobilebackup2, plist_t message, const char *backup_dir)
 {
 	if (!message || (plist_get_node_type(message) != PLIST_ARRAY) || plist_array_get_size(message) < 2 || !backup_dir) return;
 
@@ -1076,7 +1001,7 @@ static void mb2_handle_list_directory(mobilebackup2_client_t mobilebackup2, plis
 	}
 }
 
-static void mb2_handle_make_directory(mobilebackup2_client_t mobilebackup2, plist_t message, const char *backup_dir)
+void mb2_handle_make_directory(mobilebackup2_client_t mobilebackup2, plist_t message, const char *backup_dir)
 {
 	if (!message || (plist_get_node_type(message) != PLIST_ARRAY) || plist_array_get_size(message) < 2 || !backup_dir) return;
 
@@ -1103,7 +1028,7 @@ static void mb2_handle_make_directory(mobilebackup2_client_t mobilebackup2, plis
 	}
 }
 
-static void mb2_copy_file_by_path(const char *src, const char *dst)
+void mb2_copy_file_by_path(const char *src, const char *dst)
 {
 	FILE *from, *to;
 	char buf[BUFSIZ];
@@ -1135,7 +1060,7 @@ static void mb2_copy_file_by_path(const char *src, const char *dst)
 	}
 }
 
-static void mb2_copy_directory_by_path(const char *src, const char *dst)
+void mb2_copy_directory_by_path(const char *src, const char *dst)
 {
 	if (!src || !dst) {
 		return;

@@ -44,7 +44,8 @@
 #define __func__ __FUNCTION__
 
 #if DEBUG_DATA
-# define debug_info(...) printf(##__VA_ARGS__); printf("\n"); fflush(stdout);
+# define debug_info(...)
+//# define debug_info(...) printf(##__VA_ARGS__); printf("\n"); fflush(stdout);
 #else
 # define debug_info(...)
 #endif
