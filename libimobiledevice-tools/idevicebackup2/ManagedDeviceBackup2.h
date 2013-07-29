@@ -69,6 +69,8 @@ namespace BackupWrapper {
 		BackupDeviceException(String^ message, Exception^ ex) : Exception(message, ex) {}
 	};
 
+	public delegate int CancelTaskCallBack(const char *notification, void *userdata);
+
 	///<summary>
 	///Wrapper around all the unamanged code that does all the hard work of backup/restore from/to an iOS device
 	///</summary>
@@ -82,11 +84,9 @@ namespace BackupWrapper {
 			enum class CancellationType { UserCancelled, BackupDomainChanged, Unhandled };
 
 			static property Int32^ DebugLevel { Int32^ get() { return _debugLevel; } void set(Int32^ val) { _debugLevel = val; } }
-			static property ManagedDeviceBackup2^ Instance { ManagedDeviceBackup2^ get() { return _instance; } }
 
 			ManagedDeviceBackup2() {
 				_changePassword = false;
-				_instance = this;
 				_udid = NULL;
 				backup_directory = NULL;
 				backup_password = NULL;
@@ -104,6 +104,8 @@ namespace BackupWrapper {
 				mobilebackup2 = NULL;
 				willEncrypt = 0;
 				np = NULL;
+				cancelTask = gcnew CancelTaskCallBack(this, &ManagedDeviceBackup2::CancelCallback);
+				_progressCallback = nullptr;
 			}
 
 			~ManagedDeviceBackup2() {
@@ -111,7 +113,6 @@ namespace BackupWrapper {
 			}
 
 			void Cleanup() {
-				_instance = nullptr;
 				if(backup_password) {
 					free(backup_password);
 					backup_password = NULL;
@@ -166,6 +167,8 @@ namespace BackupWrapper {
 					np_client_free(np);
 					np = NULL;
 				}
+				cancelTask = nullptr;
+				_progressCallback = nullptr;
 			}
 			
 			void Backup(
@@ -174,7 +177,9 @@ namespace BackupWrapper {
 				[System::Runtime::InteropServices::Optional]
 				String^ password,
 				[System::Runtime::InteropServices::Optional]
-				String^ backupDirectoryRoot);
+				String^ backupDirectoryRoot,
+				[System::Runtime::InteropServices::Optional]
+				Action<Double>^ progressCallback);
 
 			Exception^ Restore(
 				[System::Runtime::InteropServices::Optional]
@@ -185,23 +190,20 @@ namespace BackupWrapper {
 				Boolean^ copyFirst, Boolean^ rebootWhenDone, Boolean^ removeItemsNotRestored, Boolean^ restoreSystemFiles, 
 					Boolean^ restoreSettings) { return nullptr; }
 
-			void Callback(CancellationType^ type)
-			{
-				
-			}
-
 			Boolean^ ChangePassword(String^ currentPassword, String^ newPassword) { return false; }
 			//TODO: make into a property
 			String^ LastBackupDetails() { return nullptr; }
 		private:
 			static Int32^ _debugLevel = 0;
-			static ManagedDeviceBackup2^ _instance;
 			void CommonSetup(uint64_t* lockfile);
 			bool FinishOperation();
 			void ReportProgress(plist_t message, char* identifier);
 			void ProcessMessage(plist_t message, int* error_code);
 			void CopyItem(plist_t message);
+			int CancelCallback(const char *notification, void *userdata);
+			CancelTaskCallBack^ cancelTask;
 
+			Action<Double>^ _progressCallback;
 			bool _changePassword;
 			bool _restore;
 			char* backup_password;

@@ -5,21 +5,23 @@ using namespace msclr::interop;
 
 namespace BackupWrapper {
 
-	static void ProgressCallback(const char *notification, void *userdata)
+	int ManagedDeviceBackup2::CancelCallback(const char *notification, void *userdata)
 	{
 		if (!strcmp(notification, NP_SYNC_CANCEL_REQUEST)) {
-			ManagedDeviceBackup2::Instance->Callback(ManagedDeviceBackup2::CancellationType::UserCancelled);
+			// user cancelled
 		} else if (!strcmp(notification, NP_BACKUP_DOMAIN_CHANGED)) {
-			ManagedDeviceBackup2::Instance->Callback(ManagedDeviceBackup2::CancellationType::BackupDomainChanged);
+			// wth?
 		} else {
-			ManagedDeviceBackup2::Instance->Callback(ManagedDeviceBackup2::CancellationType::BackupDomainChanged);
+			// dunno
 		}
+		return 0;
 	}
 
-	void ManagedDeviceBackup2::Backup(String^ uUid, String^ password, String^ backupDirectoryRoot) {
+	void ManagedDeviceBackup2::Backup(String^ uUid, String^ password, String^ backupDirectoryRoot, Action<Double>^ progressCallback) {
 		marshal_context^ context = gcnew marshal_context();
 		idevice_error_t ret = IDEVICE_E_UNKNOWN_ERROR;
 		int i;
+		_progressCallback = progressCallback;
 		
 		int cmd_flags = 0;
 		
@@ -152,7 +154,9 @@ namespace BackupWrapper {
 
 		if (node != NULL) {
 			plist_get_real_val(node, &progress);
-			// TODO: call a callback to report progress
+			if(_progressCallback != nullptr) {
+				_progressCallback(progress);
+			}
 		}
 	}
 
@@ -591,7 +595,12 @@ namespace BackupWrapper {
 			np_client_t tempNp;
 			np_client_new(device, service, &tempNp);
 			np = tempNp; // to free when we're all done
-			np_set_notify_callback(tempNp, ProgressCallback, NULL);
+
+			// convert our managed delegate to an unmanaged function pointer
+			IntPtr ip = Marshal::GetFunctionPointerForDelegate(cancelTask);
+			np_notify_cb_t nativeCb = static_cast<np_notify_cb_t>(ip.ToPointer());
+
+			np_set_notify_callback(tempNp, nativeCb, NULL);
 			const char *noties[5] = {
 				NP_SYNC_CANCEL_REQUEST,
 				NP_SYNC_SUSPEND_REQUEST,
