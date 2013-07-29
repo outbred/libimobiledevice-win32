@@ -19,16 +19,17 @@ namespace iMobileDeviceTester
 		{
 			base.OnStartup(e);
 			var backuper = new ManagedDeviceBackup2();
-			backuper.Backup(null, null, @"G:\trash", percentage =>
-				{
-					Console.WriteLine("Progress is {0}", percentage);
-				});
-			backuper.Dispose();
-			Thread.Sleep(1000);
-			backuper = new ManagedDeviceBackup2();
-			backuper.Backup(null, null, @"G:\trash");
-			Thread.Sleep(1000);
-			backuper.Backup(null, null, @"G:\trash");
+			backuper.Restore(@"G:\trash", null, null, false, false, false, false, null, false);
+			//backuper.Backup(null, null, @"G:\trash", percentage =>
+			//	{
+			//		Console.WriteLine("Progress is {0}", percentage);
+			//	});
+			//backuper.Dispose();
+			//Thread.Sleep(1000);
+			//backuper = new ManagedDeviceBackup2();
+			//backuper.Backup(null, null, @"G:\trash");
+			//Thread.Sleep(1000);
+			//backuper.Backup(null, null, @"G:\trash");
 		}
 	}
 }

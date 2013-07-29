@@ -138,6 +138,123 @@ namespace BackupWrapper {
 		}
 	}
 
+	void ManagedDeviceBackup2:: Restore(String^ backupDirectory, String^ sourceUuid, String^ password, Boolean^ copyFirst, Boolean^ rebootWhenDone, Boolean^ removeItemsNotRestored, 
+		Boolean^ restoreSystemFiles, Action<Double>^ progressCallback, Boolean^ restoreSettings) {
+		marshal_context^ context = gcnew marshal_context();
+		idevice_error_t ret = IDEVICE_E_UNKNOWN_ERROR;
+		int i;
+		_progressCallback = progressCallback;
+		
+		int cmd_flags = 0;
+		
+		int result_code = -1;
+		int interactive_mode = 0;
+		struct stat st;
+		plist_t opts = NULL;
+		mobilebackup2_error_t err;
+
+		try {
+
+			_restore = true;
+			if(*copyFirst) {
+				cmd_flags |= CMD_FLAG_RESTORE_COPY_BACKUP;
+			}
+			if(*restoreSettings) {
+				cmd_flags |= CMD_FLAG_RESTORE_SETTINGS;
+			}
+			if(*rebootWhenDone) {
+				cmd_flags |= CMD_FLAG_RESTORE_REBOOT;
+			}
+			if(*removeItemsNotRestored) {
+				cmd_flags |= CMD_FLAG_RESTORE_REMOVE_ITEMS;
+			}
+
+			if(!String::IsNullOrWhiteSpace(sourceUuid)) {
+				const char *tempUdid = context->marshal_as<const char*>(sourceUuid);
+				source_udid = new char[strlen(tempUdid) + 1];
+				strcpy(source_udid, tempUdid);
+			}
+
+			if(!String::IsNullOrWhiteSpace(backupDirectory)) {
+				const char* tempRoot = context->marshal_as<const char*>(backupDirectory);
+				backup_directory = new char[strlen(tempRoot) + 1];
+				strcpy(backup_directory, tempRoot);
+			}
+
+			if(!String::IsNullOrWhiteSpace(password)) {
+				const char* tempPw = context->marshal_as<const char*>(password);
+				backup_password = new char[strlen(tempPw) + 1];
+				strcpy(backup_password, tempPw);
+			}
+
+			uint64_t lockfile = 0;
+			CommonSetup(&lockfile);
+
+			 /* TODO: verify battery on AC enough battery remaining */
+
+            /* verify if Status.plist says we read from an successful backup */
+            if (!mb2_status_check_snapshot_state(backup_directory, source_udid, "finished")) {
+                printf("ERROR: Cannot ensure we restore from a successful backup. Aborting.\n");
+				throw gcnew Exception("Last backup is incomplete.");
+            }
+
+            PRINT_VERBOSE(1, "Starting Restore...\n");
+
+            opts = plist_new_dict();
+            plist_dict_insert_item(opts, "RestoreSystemFiles", plist_new_bool(cmd_flags & CMD_FLAG_RESTORE_SYSTEM_FILES));
+            PRINT_VERBOSE(1, "Restoring system files: %s\n", (cmd_flags & CMD_FLAG_RESTORE_SYSTEM_FILES ? "Yes":"No"));
+            if ((cmd_flags & CMD_FLAG_RESTORE_REBOOT) == 0)
+                plist_dict_insert_item(opts, "RestoreShouldReboot", plist_new_bool(0));
+            PRINT_VERBOSE(1, "Rebooting after restore: %s\n", (cmd_flags & CMD_FLAG_RESTORE_REBOOT ? "Yes":"No"));
+            if ((cmd_flags & CMD_FLAG_RESTORE_COPY_BACKUP) == 0)
+                plist_dict_insert_item(opts, "RestoreDontCopyBackup", plist_new_bool(1));
+            PRINT_VERBOSE(1, "Don't copy backup: %s\n", ((cmd_flags & CMD_FLAG_RESTORE_COPY_BACKUP) == 0 ? "Yes":"No"));
+            plist_dict_insert_item(opts, "RestorePreserveSettings", plist_new_bool((cmd_flags & CMD_FLAG_RESTORE_SETTINGS) == 0));
+            PRINT_VERBOSE(1, "Preserve settings of device: %s\n", ((cmd_flags & CMD_FLAG_RESTORE_SETTINGS) == 0 ? "Yes":"No"));
+            if (cmd_flags & CMD_FLAG_RESTORE_REMOVE_ITEMS)
+                plist_dict_insert_item(opts, "RemoveItemsNotRestored", plist_new_bool(1));
+            PRINT_VERBOSE(1, "Remove items that are not restored: %s\n", ((cmd_flags & CMD_FLAG_RESTORE_REMOVE_ITEMS) ? "Yes":"No"));
+            if (backup_password != NULL) {
+                plist_dict_insert_item(opts, "Password", plist_new_string(backup_password));
+            }
+            PRINT_VERBOSE(1, "Backup password: %s\n", (backup_password == NULL ? "No":"Yes"));
+
+			char *tempUdid = _udid;
+			char *tempSource = source_udid;
+            err = mobilebackup2_send_request(mobilebackup2, "Restore", tempUdid, tempSource, opts);
+            plist_free(opts);
+            if (err != MOBILEBACKUP2_E_SUCCESS) {
+                if (err == MOBILEBACKUP2_E_BAD_VERSION) {
+                    printf("ERROR: Could not start restore process: backup protocol version mismatch!\n");
+                } else if (err == MOBILEBACKUP2_E_REPLY_NOT_OK) {
+                    printf("ERROR: Could not start restore process: device refused to start the restore process.\n");
+                } else {
+                    printf("ERROR: Could not start restore process: unspecified error occured\n");
+                }
+                throw gcnew Exception("couldn't start restore.  Sorry dude.");
+            }
+
+			FinishOperation();
+
+			if (lockfile) {
+				afc_file_lock(afc, lockfile, AFC_LOCK_UN);
+				afc_file_close(afc, lockfile);
+				lockfile = 0;
+				if (_backup)
+					do_post_notification(device, NP_SYNC_DID_FINISH);
+			}
+		}
+		catch(Exception^ ex) {
+			throw gcnew System::Exception("Unable to complete backup operation. See inner exception for details.", ex);
+		}
+		catch(...) {
+			throw gcnew System::Exception("Unable to complete backup operation. Got some indecipherable native exception.");
+		}
+		finally {
+			Cleanup();
+		}
+	}
+
 	void ManagedDeviceBackup2::ReportProgress(plist_t message, char* identifier) {
 		plist_t node = NULL;
 		double progress = 0.0;
@@ -157,325 +274,6 @@ namespace BackupWrapper {
 			if(_progressCallback != nullptr) {
 				_progressCallback(progress);
 			}
-		}
-	}
-
-	/*
-		If this method gets too big, it will result in an Invalid Program exception in Release mode, so keep it small!
-	*/
-	bool ManagedDeviceBackup2::FinishOperation() {
-		/* reset operation success status */
-		int operation_ok = 0;
-		plist_t message = NULL;
-		plist_t node_tmp = NULL;
-		char *dlmsg = NULL;
-		int file_count = 0;
-		int errcode = 0;
-		const char *errdesc = NULL;
-		struct stat st;
-		mobilebackup2_error_t err;
-		int result_code;
-
-		/* process series of DLMessage* operations */
-		do {
-			if (dlmsg) {
-				free(dlmsg);
-				dlmsg = NULL;
-			}
-
-			mobilebackup2_client_t tempClient = mobilebackup2;
-			mobilebackup2_receive_message(tempClient, &message, &dlmsg);
-			tempClient = NULL;
-			if (!message || !dlmsg) {
-				PRINT_VERBOSE(1, "Device is not ready yet. Going to try again in 2 seconds...\n");
-				sleep(2);
-				continue;
-			}
-
-			if (!strcmp(dlmsg, "DLMessageDownloadFiles")) {
-				/* device wants to download files from the computer */
-				ReportProgress(message, dlmsg);
-				mb2_handle_send_files(mobilebackup2, message, backup_directory);
-			} else if (!strcmp(dlmsg, "DLMessageUploadFiles")) {
-				/* device wants to send files to the computer */
-				ReportProgress(message, dlmsg);
-				file_count += mb2_handle_receive_files(mobilebackup2, message, backup_directory);
-			} else if (!strcmp(dlmsg, "DLMessageGetFreeDiskSpace")) {
-				/* device wants to know how much disk space is available on the computer */
-				uint64_t freespace = 0;
-				int res = -1;
-	#ifdef WIN32
-				if (GetDiskFreeSpaceEx(backup_directory, (PULARGE_INTEGER)&freespace, NULL, NULL)) {
-					res = 0;
-				}
-	#else
-				struct statvfs fs;
-				memset(&fs, '\0', sizeof(fs));
-				res = statvfs(backup_directory, &fs);
-				if (res == 0) {
-					freespace = (uint64_t)fs.f_bavail * (uint64_t)fs.f_bsize;
-				}
-	#endif
-				plist_t freespace_item = plist_new_uint(freespace);
-				mobilebackup2_send_status_response(mobilebackup2, res, NULL, freespace_item);
-				plist_free(freespace_item);
-			} else if (!strcmp(dlmsg, "DLContentsOfDirectory")) {
-				/* list directory contents */
-				mb2_handle_list_directory(mobilebackup2, message, backup_directory);
-			} else if (!strcmp(dlmsg, "DLMessageCreateDirectory")) {
-				/* make a directory */
-				mb2_handle_make_directory(mobilebackup2, message, backup_directory);
-			} else if (!strcmp(dlmsg, "DLMessageMoveFiles") || !strcmp(dlmsg, "DLMessageMoveItems")) {
-				/* perform a series of rename operations */
-				ReportProgress(message, dlmsg);
-				plist_t moves = plist_array_get_item(message, 1);
-				uint32_t cnt = plist_dict_get_size(moves);
-				PRINT_VERBOSE(1, "Moving %d file%s\n", cnt, (cnt == 1) ? "" : "s");
-				plist_dict_iter iter = NULL;
-				plist_dict_new_iter(moves, &iter);
-				errcode = 0;
-				errdesc = NULL;
-				if (iter) {
-					char *key = NULL;
-					plist_t val = NULL;
-					do {
-						plist_dict_next_item(moves, iter, &key, &val);
-						if (key && (plist_get_node_type(val) == PLIST_STRING)) {
-							char *str = NULL;
-							plist_get_string_val(val, &str);
-							if (str) {
-								char *newpath = build_path(backup_directory, str, NULL);
-								free(str);
-								char *oldpath = build_path(backup_directory, key, NULL);
-
-	#ifdef WIN32
-								if ((stat(newpath, &st) == 0) && S_ISDIR(st.st_mode))
-									RemoveDirectory(newpath);
-								else
-									DeleteFile(newpath);
-	#else
-								remove(newpath);
-	#endif
-								if (rename(oldpath, newpath) < 0) {
-									printf("Renaming '%s' to '%s' failed: %s (%d)\n", oldpath, newpath, strerror(errno), errno);
-									errcode = errno_to_device_error(errno);
-									errdesc = strerror(errno);
-									break;
-								}
-								free(oldpath);
-								free(newpath);
-							}
-							free(key);
-							key = NULL;
-						}
-					} while (val);
-					free(iter);
-				} else {
-					errcode = -1;
-					errdesc = "Could not create dict iterator";
-					printf("Could not create dict iterator\n");
-				}
-				plist_t empty_dict = plist_new_dict();
-				err = mobilebackup2_send_status_response(mobilebackup2, errcode, errdesc, empty_dict);
-				plist_free(empty_dict);
-				if (err != MOBILEBACKUP2_E_SUCCESS) {
-					printf("Could not send status response, error %d\n", err);
-				}
-			} else if (!strcmp(dlmsg, "DLMessageRemoveFiles") || !strcmp(dlmsg, "DLMessageRemoveItems")) {
-				ReportProgress(message, dlmsg);
-				plist_t removes = plist_array_get_item(message, 1);
-				uint32_t cnt = plist_array_get_size(removes);
-				PRINT_VERBOSE(1, "Removing %d file%s\n", cnt, (cnt == 1) ? "" : "s");
-				uint32_t ii = 0;
-				errcode = 0;
-				errdesc = NULL;
-				for (ii = 0; ii < cnt; ii++) {
-					plist_t val = plist_array_get_item(removes, ii);
-					if (plist_get_node_type(val) == PLIST_STRING) {
-						char *str = NULL;
-						plist_get_string_val(val, &str);
-						if (str) {
-							const char *checkfile = strchr(str, '/');
-							int suppress_warning = 0;
-							if (checkfile) {
-								if (strcmp(checkfile+1, "Manifest.mbdx") == 0) {
-									suppress_warning = 1;
-								}
-							}
-							char *newpath = build_path(backup_directory, str, NULL);
-							free(str);
-	#ifdef WIN32
-							int res = 0;
-							if ((stat(newpath, &st) == 0) && S_ISDIR(st.st_mode))
-								res = RemoveDirectory(newpath);
-							else
-								res = DeleteFile(newpath);
-							if (!res) {
-								int e = win32err_to_errno(GetLastError());
-								if (!suppress_warning)
-									printf("Could not remove '%s': %s (%d)\n", newpath, strerror(e), e);
-								errcode = errno_to_device_error(e);
-								errdesc = strerror(e);
-							}
-	#else
-							if (remove(newpath) < 0) {
-								if (!suppress_warning)
-									printf("Could not remove '%s': %s (%d)\n", newpath, strerror(errno), errno);
-								errcode = errno_to_device_error(errno);
-								errdesc = strerror(errno);
-							}
-	#endif
-							free(newpath);
-						}
-					}
-				}
-				plist_t empty_dict = plist_new_dict();
-				err = mobilebackup2_send_status_response(mobilebackup2, errcode, errdesc, empty_dict);
-				plist_free(empty_dict);
-				if (err != MOBILEBACKUP2_E_SUCCESS) {
-					printf("Could not send status response, error %d\n", err);
-				}
-			} else if (!strcmp(dlmsg, "DLMessageCopyItem")) {
-				CopyItem(message);
-			} else if (!strcmp(dlmsg, "DLMessageDisconnect")) {
-				break;
-			} else if (!strcmp(dlmsg, "DLMessageProcessMessage")) {
-				ProcessMessage(message, &result_code);
-
-				break;
-			}
-
-			if (message)
-				plist_free(message);
-			message = NULL;
-
-		} while (1);
-
-		
-		if(node_tmp) {
-			plist_free(node_tmp);
-			node_tmp = NULL;
-		}
-
-		//if(dlmsg) {
-		//	free(dlmsg);
-		//	dlmsg = NULL;
-		//}
-
-		if (lockdown) {
-			lockdownd_client_free(lockdown);
-			lockdown = NULL;
-		}
-
-		if (mobilebackup2) {
-			mobilebackup2_client_free(mobilebackup2);
-			mobilebackup2 = NULL;
-		}
-
-		if (afc) {
-			afc_client_free(afc);
-			afc = NULL;
-		}
-
-		if (np) {
-			np_client_free(np);
-			np = NULL;
-		}
-
-		idevice_free(device);
-		device = NULL;
-
-		if (_udid) {
-			free(_udid);
-			_udid = NULL;
-		}
-		if (source_udid) {
-			free(source_udid);
-			source_udid = NULL;
-		}
-
-		return result_code == 0;
-	}
-
-	void ManagedDeviceBackup2::CopyItem(plist_t message) {
-		plist_t srcpath = plist_array_get_item(message, 1);
-		plist_t dstpath = plist_array_get_item(message, 2);
-		struct stat st;
-
-		int errcode = 0;
-		const char* errdesc = NULL;
-		if ((plist_get_node_type(srcpath) == PLIST_STRING) && (plist_get_node_type(dstpath) == PLIST_STRING)) {
-			char *src = NULL;
-			char *dst = NULL;
-			plist_get_string_val(srcpath, &src);
-			plist_get_string_val(dstpath, &dst);
-			if (src && dst) {
-				char *oldpath = build_path(backup_directory, src, NULL);
-				char *newpath = build_path(backup_directory, dst, NULL);
-
-				PRINT_VERBOSE(1, "Copying '%s' to '%s'\n", src, dst);
-
-				/* check that src exists */
-				if ((stat(oldpath, &st) == 0) && S_ISDIR(st.st_mode)) {
-					mb2_copy_directory_by_path(oldpath, newpath);
-				} else if ((stat(oldpath, &st) == 0) && S_ISREG(st.st_mode)) {
-					mb2_copy_file_by_path(oldpath, newpath);
-				}
-
-				free(newpath);
-				free(oldpath);
-			}
-			free(src);
-			free(dst);
-		}
-		plist_t empty_dict = plist_new_dict();
-		mobilebackup2_error_t err = mobilebackup2_send_status_response(mobilebackup2, errcode, errdesc, empty_dict);
-		plist_free(empty_dict);
-		if (err != MOBILEBACKUP2_E_SUCCESS) {
-			printf("Could not send status response, error %d\n", err);
-		}
-	}
-
-	void ManagedDeviceBackup2::ProcessMessage(plist_t message, int *result_code) {
-		plist_t node_tmp = plist_array_get_item(message, 1);
-		if (plist_get_node_type(node_tmp) != PLIST_DICT) {
-			printf("Unknown message received!\n");
-		}
-		plist_t nn;
-		int error_code = -1;
-		nn = plist_dict_get_item(node_tmp, "ErrorCode");
-		if (nn && (plist_get_node_type(nn) == PLIST_UINT)) {
-			uint64_t ec = 0;
-			plist_get_uint_val(nn, &ec);
-			error_code = (uint32_t)ec;
-			if (error_code == 0) {
-				*result_code = 0;
-			} else {
-				*result_code = -error_code;
-			}
-		}
-		nn = plist_dict_get_item(node_tmp, "ErrorDescription");
-		char *str = NULL;
-		if (nn && (plist_get_node_type(nn) == PLIST_STRING)) {
-			plist_get_string_val(nn, &str);
-		}
-		if (error_code != 0) {
-			if (str) {
-				printf("ErrorCode %d: %s\n", error_code, str);
-			} else {
-				printf("ErrorCode %d: (Unknown)\n", error_code);
-			}
-		}
-		if (str) {
-			free(str);
-		}
-		nn = plist_dict_get_item(node_tmp, "Content");
-		if (nn && (plist_get_node_type(nn) == PLIST_STRING)) {
-			str = NULL;
-			plist_get_string_val(nn, &str);
-			PRINT_VERBOSE(1, "Content:\n");
-			printf("%s", str);
-			free(str);
 		}
 	}
 
@@ -524,8 +322,6 @@ namespace BackupWrapper {
 		tempDevice = NULL;
 
 		source_udid = strdup(_udid);
-
-		uint8_t is_encrypted = 0;
 			
 		if (_changePassword) {
 			if (!backup_password || !new_password) {
@@ -558,7 +354,9 @@ namespace BackupWrapper {
 				}
 				node_tmp = plist_dict_get_item(manifest_plist, "IsEncrypted");
 				if (node_tmp && (plist_get_node_type(node_tmp) == PLIST_BOOLEAN)) {
-					plist_get_bool_val(node_tmp, &is_encrypted);
+					uint8_t temp;
+					plist_get_bool_val(node_tmp, &temp);
+					is_encrypted = temp;
 				}
 				plist_free(manifest_plist);
 				free(manifest_path);
@@ -730,5 +528,330 @@ namespace BackupWrapper {
 		}
 
 		delete context;
+	}
+
+	/*
+		If this method gets too big, it will result in an Invalid Program exception in Release mode, so keep it small!
+	*/
+	bool ManagedDeviceBackup2::FinishOperation() {
+		/* reset operation success status */
+		int operation_ok = 0;
+		plist_t message = NULL;
+		plist_t node_tmp = NULL;
+		char *dlmsg = NULL;
+		int file_count = 0;
+		int errcode = 0;
+		const char *errdesc = NULL;
+		struct stat st;
+		mobilebackup2_error_t err;
+		int result_code;
+
+		/* process series of DLMessage* operations */
+		do {
+			if (dlmsg) {
+				free(dlmsg);
+				dlmsg = NULL;
+			}
+
+			mobilebackup2_client_t tempClient = mobilebackup2;
+			mobilebackup2_receive_message(tempClient, &message, &dlmsg);
+			tempClient = NULL;
+			if (!message || !dlmsg) {
+				PRINT_VERBOSE(1, "Device is not ready yet. Going to try again in 2 seconds...\n");
+				sleep(2);
+				continue;
+			}
+
+			if (!strcmp(dlmsg, "DLMessageDownloadFiles")) {
+				/* device wants to download files from the computer */
+				ReportProgress(message, dlmsg);
+				mb2_handle_send_files(mobilebackup2, message, backup_directory);
+			} else if (!strcmp(dlmsg, "DLMessageUploadFiles")) {
+				/* device wants to send files to the computer */
+				ReportProgress(message, dlmsg);
+				file_count += mb2_handle_receive_files(mobilebackup2, message, backup_directory);
+			} else if (!strcmp(dlmsg, "DLMessageGetFreeDiskSpace")) {
+				/* device wants to know how much disk space is available on the computer */
+				uint64_t freespace = 0;
+				int res = -1;
+	#ifdef WIN32
+				if (GetDiskFreeSpaceEx(backup_directory, (PULARGE_INTEGER)&freespace, NULL, NULL)) {
+					res = 0;
+				}
+	#else
+				struct statvfs fs;
+				memset(&fs, '\0', sizeof(fs));
+				res = statvfs(backup_directory, &fs);
+				if (res == 0) {
+					freespace = (uint64_t)fs.f_bavail * (uint64_t)fs.f_bsize;
+				}
+	#endif
+				plist_t freespace_item = plist_new_uint(freespace);
+				mobilebackup2_send_status_response(mobilebackup2, res, NULL, freespace_item);
+				plist_free(freespace_item);
+			} else if (!strcmp(dlmsg, "DLContentsOfDirectory")) {
+				/* list directory contents */
+				mb2_handle_list_directory(mobilebackup2, message, backup_directory);
+			} else if (!strcmp(dlmsg, "DLMessageCreateDirectory")) {
+				/* make a directory */
+				mb2_handle_make_directory(mobilebackup2, message, backup_directory);
+			} else if (!strcmp(dlmsg, "DLMessageMoveFiles") || !strcmp(dlmsg, "DLMessageMoveItems")) {
+				/* perform a series of rename operations */
+				ReportProgress(message, dlmsg);
+				plist_t moves = plist_array_get_item(message, 1);
+				uint32_t cnt = plist_dict_get_size(moves);
+				PRINT_VERBOSE(1, "Moving %d file%s\n", cnt, (cnt == 1) ? "" : "s");
+				plist_dict_iter iter = NULL;
+				plist_dict_new_iter(moves, &iter);
+				errcode = 0;
+				errdesc = NULL;
+				if (iter) {
+					char *key = NULL;
+					plist_t val = NULL;
+					do {
+						plist_dict_next_item(moves, iter, &key, &val);
+						if (key && (plist_get_node_type(val) == PLIST_STRING)) {
+							char *str = NULL;
+							plist_get_string_val(val, &str);
+							if (str) {
+								char *newpath = build_path(backup_directory, str, NULL);
+								free(str);
+								char *oldpath = build_path(backup_directory, key, NULL);
+
+	#ifdef WIN32
+								if ((stat(newpath, &st) == 0) && S_ISDIR(st.st_mode))
+									RemoveDirectory(newpath);
+								else
+									DeleteFile(newpath);
+	#else
+								remove(newpath);
+	#endif
+								if (rename(oldpath, newpath) < 0) {
+									printf("Renaming '%s' to '%s' failed: %s (%d)\n", oldpath, newpath, strerror(errno), errno);
+									errcode = errno_to_device_error(errno);
+									errdesc = strerror(errno);
+									break;
+								}
+								free(oldpath);
+								free(newpath);
+							}
+							free(key);
+							key = NULL;
+						}
+					} while (val);
+					free(iter);
+				} else {
+					errcode = -1;
+					errdesc = "Could not create dict iterator";
+					printf("Could not create dict iterator\n");
+				}
+				plist_t empty_dict = plist_new_dict();
+				err = mobilebackup2_send_status_response(mobilebackup2, errcode, errdesc, empty_dict);
+				plist_free(empty_dict);
+				if (err != MOBILEBACKUP2_E_SUCCESS) {
+					printf("Could not send status response, error %d\n", err);
+				}
+			} else if (!strcmp(dlmsg, "DLMessageRemoveFiles") || !strcmp(dlmsg, "DLMessageRemoveItems")) {
+				RemoveItem(message, dlmsg);
+			} else if (!strcmp(dlmsg, "DLMessageCopyItem")) {
+				CopyItem(message);
+			} else if (!strcmp(dlmsg, "DLMessageDisconnect")) {
+				break;
+			} else if (!strcmp(dlmsg, "DLMessageProcessMessage")) {
+				ProcessMessage(message, &result_code);
+
+				break;
+			}
+
+			if (message)
+				plist_free(message);
+			message = NULL;
+
+		} while (1);
+
+		
+		if(node_tmp) {
+			plist_free(node_tmp);
+			node_tmp = NULL;
+		}
+
+		//if(dlmsg) {
+		//	free(dlmsg);
+		//	dlmsg = NULL;
+		//}
+
+		if (lockdown) {
+			lockdownd_client_free(lockdown);
+			lockdown = NULL;
+		}
+
+		if (mobilebackup2) {
+			mobilebackup2_client_free(mobilebackup2);
+			mobilebackup2 = NULL;
+		}
+
+		if (afc) {
+			afc_client_free(afc);
+			afc = NULL;
+		}
+
+		if (np) {
+			np_client_free(np);
+			np = NULL;
+		}
+
+		idevice_free(device);
+		device = NULL;
+
+		if (_udid) {
+			free(_udid);
+			_udid = NULL;
+		}
+		if (source_udid) {
+			free(source_udid);
+			source_udid = NULL;
+		}
+
+		return result_code == 0;
+	}
+
+	void ManagedDeviceBackup2::RemoveItem(plist_t message, char *dlmsg) {
+		ReportProgress(message, dlmsg);
+		plist_t removes = plist_array_get_item(message, 1);
+		uint32_t cnt = plist_array_get_size(removes);
+		PRINT_VERBOSE(1, "Removing %d file%s\n", cnt, (cnt == 1) ? "" : "s");
+		uint32_t ii = 0;
+		int errcode = 0;
+		const char* errdesc = NULL;
+		struct stat st;
+
+		for (ii = 0; ii < cnt; ii++) {
+			plist_t val = plist_array_get_item(removes, ii);
+			if (plist_get_node_type(val) == PLIST_STRING) {
+				char *str = NULL;
+				plist_get_string_val(val, &str);
+				if (str) {
+					const char *checkfile = strchr(str, '/');
+					int suppress_warning = 0;
+					if (checkfile) {
+						if (strcmp(checkfile+1, "Manifest.mbdx") == 0) {
+							suppress_warning = 1;
+						}
+					}
+					char *newpath = build_path(backup_directory, str, NULL);
+					free(str);
+#ifdef WIN32
+					int res = 0;
+					if ((stat(newpath, &st) == 0) && S_ISDIR(st.st_mode))
+						res = RemoveDirectory(newpath);
+					else
+						res = DeleteFile(newpath);
+					if (!res) {
+						int e = win32err_to_errno(GetLastError());
+						if (!suppress_warning)
+							printf("Could not remove '%s': %s (%d)\n", newpath, strerror(e), e);
+						errcode = errno_to_device_error(e);
+						errdesc = strerror(e);
+					}
+#else
+					if (remove(newpath) < 0) {
+						if (!suppress_warning)
+							printf("Could not remove '%s': %s (%d)\n", newpath, strerror(errno), errno);
+						errcode = errno_to_device_error(errno);
+						errdesc = strerror(errno);
+					}
+#endif
+					free(newpath);
+				}
+			}
+		}
+		plist_t empty_dict = plist_new_dict();
+		mobilebackup2_error_t err = mobilebackup2_send_status_response(mobilebackup2, errcode, errdesc, empty_dict);
+		plist_free(empty_dict);
+		if (err != MOBILEBACKUP2_E_SUCCESS) {
+			printf("Could not send status response, error %d\n", err);
+		}
+	}
+
+	void ManagedDeviceBackup2::CopyItem(plist_t message) {
+		plist_t srcpath = plist_array_get_item(message, 1);
+		plist_t dstpath = plist_array_get_item(message, 2);
+		struct stat st;
+
+		int errcode = 0;
+		const char* errdesc = NULL;
+		if ((plist_get_node_type(srcpath) == PLIST_STRING) && (plist_get_node_type(dstpath) == PLIST_STRING)) {
+			char *src = NULL;
+			char *dst = NULL;
+			plist_get_string_val(srcpath, &src);
+			plist_get_string_val(dstpath, &dst);
+			if (src && dst) {
+				char *oldpath = build_path(backup_directory, src, NULL);
+				char *newpath = build_path(backup_directory, dst, NULL);
+
+				PRINT_VERBOSE(1, "Copying '%s' to '%s'\n", src, dst);
+
+				/* check that src exists */
+				if ((stat(oldpath, &st) == 0) && S_ISDIR(st.st_mode)) {
+					mb2_copy_directory_by_path(oldpath, newpath);
+				} else if ((stat(oldpath, &st) == 0) && S_ISREG(st.st_mode)) {
+					mb2_copy_file_by_path(oldpath, newpath);
+				}
+
+				free(newpath);
+				free(oldpath);
+			}
+			free(src);
+			free(dst);
+		}
+		plist_t empty_dict = plist_new_dict();
+		mobilebackup2_error_t err = mobilebackup2_send_status_response(mobilebackup2, errcode, errdesc, empty_dict);
+		plist_free(empty_dict);
+		if (err != MOBILEBACKUP2_E_SUCCESS) {
+			printf("Could not send status response, error %d\n", err);
+		}
+	}
+
+	void ManagedDeviceBackup2::ProcessMessage(plist_t message, int *result_code) {
+		plist_t node_tmp = plist_array_get_item(message, 1);
+		if (plist_get_node_type(node_tmp) != PLIST_DICT) {
+			printf("Unknown message received!\n");
+		}
+		plist_t nn;
+		int error_code = -1;
+		nn = plist_dict_get_item(node_tmp, "ErrorCode");
+		if (nn && (plist_get_node_type(nn) == PLIST_UINT)) {
+			uint64_t ec = 0;
+			plist_get_uint_val(nn, &ec);
+			error_code = (uint32_t)ec;
+			if (error_code == 0) {
+				*result_code = 0;
+			} else {
+				*result_code = -error_code;
+			}
+		}
+		nn = plist_dict_get_item(node_tmp, "ErrorDescription");
+		char *str = NULL;
+		if (nn && (plist_get_node_type(nn) == PLIST_STRING)) {
+			plist_get_string_val(nn, &str);
+		}
+		if (error_code != 0) {
+			if (str) {
+				printf("ErrorCode %d: %s\n", error_code, str);
+			} else {
+				printf("ErrorCode %d: (Unknown)\n", error_code);
+			}
+		}
+		if (str) {
+			free(str);
+		}
+		nn = plist_dict_get_item(node_tmp, "Content");
+		if (nn && (plist_get_node_type(nn) == PLIST_STRING)) {
+			str = NULL;
+			plist_get_string_val(nn, &str);
+			PRINT_VERBOSE(1, "Content:\n");
+			printf("%s", str);
+			free(str);
+		}
 	}
 }

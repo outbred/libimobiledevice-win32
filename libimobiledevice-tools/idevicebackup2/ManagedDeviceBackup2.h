@@ -106,6 +106,7 @@ namespace BackupWrapper {
 				np = NULL;
 				cancelTask = gcnew CancelTaskCallBack(this, &ManagedDeviceBackup2::CancelCallback);
 				_progressCallback = nullptr;
+				is_encrypted = 0;
 			}
 
 			~ManagedDeviceBackup2() {
@@ -181,14 +182,24 @@ namespace BackupWrapper {
 				[System::Runtime::InteropServices::Optional]
 				Action<Double>^ progressCallback);
 
-			Exception^ Restore(
+			void Restore(
+				String^ backupDirectory,
 				[System::Runtime::InteropServices::Optional]
 				String^ sourceUuid,
 				[System::Runtime::InteropServices::Optional]
 				String^ password,
 				[System::Runtime::InteropServices::Optional]
-				Boolean^ copyFirst, Boolean^ rebootWhenDone, Boolean^ removeItemsNotRestored, Boolean^ restoreSystemFiles, 
-					Boolean^ restoreSettings) { return nullptr; }
+				Boolean^ copyFirst, 
+				[System::Runtime::InteropServices::Optional]
+				Boolean^ rebootWhenDone, 
+				[System::Runtime::InteropServices::Optional]
+				Boolean^ removeItemsNotRestored, 
+				[System::Runtime::InteropServices::Optional]
+				Boolean^ restoreSystemFiles, 
+				[System::Runtime::InteropServices::Optional]
+				Action<Double>^ progressCallback,
+				[System::Runtime::InteropServices::Optional]
+				Boolean^ restoreSettings);
 
 			Boolean^ ChangePassword(String^ currentPassword, String^ newPassword) { return false; }
 			//TODO: make into a property
@@ -200,6 +211,7 @@ namespace BackupWrapper {
 			void ReportProgress(plist_t message, char* identifier);
 			void ProcessMessage(plist_t message, int* error_code);
 			void CopyItem(plist_t message);
+			void RemoveItem(plist_t message, char *dlmsg);
 			int CancelCallback(const char *notification, void *userdata);
 			CancelTaskCallBack^ cancelTask;
 
@@ -219,6 +231,7 @@ namespace BackupWrapper {
 			afc_client_t afc;
 			bool is_full_backup;
 			bool _backup;
+			uint8_t is_encrypted;
 			mobilebackup2_client_t mobilebackup2;
 			uint8_t willEncrypt;
 			np_client_t np;
