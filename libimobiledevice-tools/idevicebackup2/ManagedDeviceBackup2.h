@@ -69,6 +69,9 @@ namespace BackupWrapper {
 		BackupDeviceException(String^ message, Exception^ ex) : Exception(message, ex) {}
 	};
 
+	///<summary>
+	///Wrapper around all the unamanged code that does all the hard work of backup/restore from/to an iOS device
+	///</summary>
 	public ref class ManagedDeviceBackup2
 	{
 		protected: 
@@ -194,8 +197,11 @@ namespace BackupWrapper {
 			static Int32^ _debugLevel = 0;
 			static ManagedDeviceBackup2^ _instance;
 			void CommonSetup(uint64_t* lockfile);
-			bool FinishOperation(uint64_t lockfile);
+			bool FinishOperation();
 			void ReportProgress(plist_t message, char* identifier);
+			void ProcessMessage(plist_t message, int* error_code);
+			void CopyItem(plist_t message);
+
 			bool _changePassword;
 			bool _restore;
 			char* backup_password;
@@ -206,7 +212,7 @@ namespace BackupWrapper {
 			lockdownd_service_descriptor_t service;
 			plist_t info_plist;
 			char* source_udid;
-			char* info_path; // TODO: make local
+			char* info_path;
 			lockdownd_client_t lockdown;
 			afc_client_t afc;
 			bool is_full_backup;

@@ -83,7 +83,11 @@ static int libusbmuxd_debug = DEBUG_DATA;
 #ifndef __func__
 # define __func__ __FUNCTION__
 #endif
+#if WIN32
+#define DEBUG(x, y, ...)
+#else
 #define DEBUG(x, y, ...) if (x <= libusbmuxd_debug) fprintf(stderr, (y), __VA_ARGS__); fflush(stderr);
+#endif
 
 #if DEBUG_DATA
 
