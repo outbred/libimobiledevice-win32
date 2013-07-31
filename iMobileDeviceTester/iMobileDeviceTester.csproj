@@ -136,12 +136,6 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\libimobiledevice-tools\idevicebackup2\idevicebackup2.vcxproj">
-      <Project>{98e67352-7104-464c-8774-149b704660a1}</Project>
-      <Name>idevicebackup2</Name>
-    </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.0">
       <Visible>False</Visible>
       <ProductName>Microsoft .NET Framework 4 %28x86 and x64%29</ProductName>
@@ -162,6 +156,12 @@
       <ProductName>Windows Installer 4.5</ProductName>
       <Install>true</Install>
     </BootstrapperPackage>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ManagediDeviceBackup2\ManagediDeviceBackup2.vcxproj">
+      <Project>{7777787a-54e4-4c78-96b1-45b9545d9f48}</Project>
+      <Name>ManagediDeviceBackup2</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

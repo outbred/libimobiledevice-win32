@@ -1,4 +1,4 @@
-#include "idevicebackup2.h"
+#include "iDeviceBackup2.h"
 
 using namespace System;
 using namespace System::Runtime::InteropServices;
@@ -11,6 +11,14 @@ namespace BackupWrapper {
 	public:
 		NoDeviceFoundException() : Exception("No device detected.  Plugged in and turned on?") {}
 		NoDeviceFoundException(Exception^ ex) : Exception("No device detected.  Plugged in and turned on?", ex) {}
+	};
+
+	[Serializable]
+	public ref class DeviceErrorException : public Exception 
+	{
+	public:
+		DeviceErrorException() : Exception("Error communicating with device.") {}
+		DeviceErrorException(Exception^ ex) : Exception("Error communicating with device.", ex) {}
 	};
 
 	[Serializable]
@@ -69,6 +77,14 @@ namespace BackupWrapper {
 		BackupDeviceException(String^ message, Exception^ ex) : Exception(message, ex) {}
 	};
 
+	[Serializable]
+	public ref class RestoreDeviceException : public Exception 
+	{
+	public:
+		RestoreDeviceException(String^ message) : Exception(message) {}
+		RestoreDeviceException(String^ message, Exception^ ex) : Exception(message, ex) {}
+	};
+
 	public delegate int CancelTaskCallBack(const char *notification, void *userdata);
 
 	///<summary>
@@ -83,95 +99,14 @@ namespace BackupWrapper {
 		public:
 			enum class CancellationType { UserCancelled, BackupDomainChanged, Unhandled };
 
-			static property Int32^ DebugLevel { Int32^ get() { return _debugLevel; } void set(Int32^ val) { _debugLevel = val; } }
-
 			ManagedDeviceBackup2() {
-				_changePassword = false;
-				_udid = NULL;
-				backup_directory = NULL;
-				backup_password = NULL;
-				device = NULL;
-				service = NULL;
-				info_plist = NULL;
-				source_udid = NULL;
-				info_path = NULL; 
-				lockdown = NULL;
-				afc = NULL;
-				is_full_backup = false;
-				_restore = false;
-				_backup = false;
-				new_password = NULL;
-				mobilebackup2 = NULL;
-				willEncrypt = 0;
-				np = NULL;
-				cancelTask = gcnew CancelTaskCallBack(this, &ManagedDeviceBackup2::CancelCallback);
-				_progressCallback = nullptr;
-				is_encrypted = 0;
+				Initialize();
 			}
 
 			~ManagedDeviceBackup2() {
 				Cleanup();
 			}
 
-			void Cleanup() {
-				if(backup_password) {
-					free(backup_password);
-					backup_password = NULL;
-				}
-				if(new_password) {
-					free(new_password);
-					new_password = NULL;
-				}
-				if(backup_directory) {
-					free(backup_directory);
-					backup_directory = NULL;
-				}
-				if(_udid) {
-					free(_udid);
-					_udid = NULL;
-				}
-				if(device) {
-					idevice_free(device);
-					device = NULL;
-				}
-
-				if (service) {
-					lockdownd_service_descriptor_free(service);
-					service = NULL;
-				}
-				if (info_plist) {
-					plist_free(info_plist);
-					info_plist = NULL;
-				}
-				if(source_udid) {
-					free(source_udid);
-					source_udid = NULL;
-				}
-				if(info_path) {
-					free(info_path);
-					info_path = NULL;
-				}
-				if (lockdown) {
-					lockdownd_client_free(lockdown);
-					lockdown = NULL;
-				}
-				if (mobilebackup2) {
-					mobilebackup2_client_free(mobilebackup2);
-					mobilebackup2 = NULL;
-				}				
-				if (afc) {
-					afc_client_free(afc);
-					afc = NULL;
-				}
-
-				if (np) {
-					np_client_free(np);
-					np = NULL;
-				}
-				cancelTask = nullptr;
-				_progressCallback = nullptr;
-			}
-			
 			void Backup(
 				[System::Runtime::InteropServices::Optional]
 				String^ uUid,
@@ -180,7 +115,7 @@ namespace BackupWrapper {
 				[System::Runtime::InteropServices::Optional]
 				String^ backupDirectoryRoot,
 				[System::Runtime::InteropServices::Optional]
-				Action<Double>^ progressCallback);
+				Action<Double, Double>^ progressCallback);
 
 			void Restore(
 				String^ backupDirectory,
@@ -189,51 +124,62 @@ namespace BackupWrapper {
 				[System::Runtime::InteropServices::Optional]
 				String^ password,
 				[System::Runtime::InteropServices::Optional]
-				Boolean^ copyFirst, 
+				bool^ copyFirst, 
 				[System::Runtime::InteropServices::Optional]
-				Boolean^ rebootWhenDone, 
+				bool^ rebootWhenDone, 
 				[System::Runtime::InteropServices::Optional]
-				Boolean^ removeItemsNotRestored, 
+				bool^ removeItemsNotRestored, 
 				[System::Runtime::InteropServices::Optional]
-				Boolean^ restoreSystemFiles, 
+				bool^ restoreSystemFiles, 
 				[System::Runtime::InteropServices::Optional]
-				Action<Double>^ progressCallback,
+				Action<Double, Double>^ progressCallback,
 				[System::Runtime::InteropServices::Optional]
-				Boolean^ restoreSettings);
+				bool^ restoreSettings);
 
 			Boolean^ ChangePassword(String^ currentPassword, String^ newPassword) { return false; }
 			//TODO: make into a property
 			String^ LastBackupDetails() { return nullptr; }
 		private:
-			static Int32^ _debugLevel = 0;
-			void CommonSetup(uint64_t* lockfile);
-			bool FinishOperation();
-			void ReportProgress(plist_t message, char* identifier);
-			void ProcessMessage(plist_t message, int* error_code);
-			void CopyItem(plist_t message);
-			void RemoveItem(plist_t message, char *dlmsg);
+			delegate void ProgressCallbackWrapper(uint64_t current, uint64_t total);
+			int Errors;
+			cmd_mode RequestedOperation;
 			int CancelCallback(const char *notification, void *userdata);
-			CancelTaskCallBack^ cancelTask;
+			void Cleanup() {
+				if(_deviceBackup) {
+					Errors = _deviceBackup->GetErrorFlags();
+					RequestedOperation = _deviceBackup->GetRequestedOperation();
+					delete _deviceBackup;
+					_deviceBackup = NULL;
+				}
+				cancelTask = nullptr;
+				_progressCallback = nullptr;
+			}
 
-			Action<Double>^ _progressCallback;
-			bool _changePassword;
-			bool _restore;
-			char* backup_password;
-			char* new_password;
-			char* backup_directory;
-			char* _udid;
-			idevice_t device;
-			lockdownd_service_descriptor_t service;
-			plist_t info_plist;
-			char* source_udid;
-			char* info_path;
-			lockdownd_client_t lockdown;
-			afc_client_t afc;
-			bool is_full_backup;
-			bool _backup;
-			uint8_t is_encrypted;
-			mobilebackup2_client_t mobilebackup2;
-			uint8_t willEncrypt;
-			np_client_t np;
+			void Initialize() {
+				Errors = 0;
+				cancelTask = gcnew CancelTaskCallBack(this, &ManagedDeviceBackup2::CancelCallback);
+				_progressCallback = nullptr;
+				progressWrapper = gcnew ProgressCallbackWrapper(this, &ManagedDeviceBackup2::ReportProgress);
+			}
+
+			progress_t GetProgressCallback() {
+				if(_deviceBackup) {
+					IntPtr ip = Marshal::GetFunctionPointerForDelegate(progressWrapper);
+					return static_cast<progress_t>(ip.ToPointer());
+				}
+				return NULL;
+			}
+
+			void ReportProgress(uint64_t current, uint64_t total) {
+				if(_progressCallback != nullptr) {
+					_progressCallback(static_cast<double>(current), static_cast<double>(total));
+				}
+			}
+			void DecodeErrors();
+
+			CancelTaskCallBack^ cancelTask;
+			ProgressCallbackWrapper^ progressWrapper;
+			Action<Double, Double>^ _progressCallback;
+			iDeviceBackup2* _deviceBackup;
 	};
 }

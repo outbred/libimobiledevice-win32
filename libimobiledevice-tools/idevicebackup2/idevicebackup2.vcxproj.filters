@@ -11,18 +11,15 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="idevicebackup2.cpp">
+    <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ManagedDeviceBackup2.cpp">
+    <ClCompile Include="iDeviceBackup2.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="idevicebackup2.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ManagedDeviceBackup2.h">
+    <ClInclude Include="iDeviceBackup2.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
