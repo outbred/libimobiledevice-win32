@@ -133,6 +133,9 @@ public:
 	cmd_mode GetRequestedOperation() {
 		return RequestedOperation;
 	}
+	const char *GetInfo() {
+		return static_cast<const char*>(Info);
+	}
 	iDeviceBackup2(const char *backupDirectory = NULL, bool backup = false, bool restore = false, const char *input_udid = NULL, 
 		const char *input_sourceUdid = NULL, bool restoreSystem = false, bool rebootAfterRestore = false, bool copyBeforeRestore = false, 
 		bool restoreSettings = false, bool removeUnusedAfterRestore = false, const char *password = NULL, const char *newPassword = NULL, 
@@ -141,9 +144,10 @@ public:
 		Initialize();
 
 		idevice_set_debug_level(debugLevel);
-		udid = strdup(input_udid);
-		source_udid = strdup(input_sourceUdid);
-		backup_directory = strdup(backupDirectory);
+		udid = _strdup(input_udid);
+		source_udid = _strdup(input_sourceUdid);
+		backup_directory = _strdup(backupDirectory);
+		Info = NULL;
 
 		if(backup) {
 			cmd = CMD_BACKUP;
@@ -179,8 +183,8 @@ public:
 		if(removeUnusedAfterRestore) {
 			cmd_flags |= CMD_FLAG_RESTORE_REMOVE_ITEMS;
 		}
-		backup_password = strdup(password);
-		newpw = strdup(newPassword);
+		backup_password = _strdup(password);
+		newpw = _strdup(newPassword);
 	}
 
 	~iDeviceBackup2(void) {
@@ -203,6 +207,7 @@ private:
 	progress_t m_progressCallback;
 	cmd_mode RequestedOperation;
 	int Errors;
+	char *Info;
 	void Initialize() {
 		Errors = 0;
 		ret = IDEVICE_E_UNKNOWN_ERROR;

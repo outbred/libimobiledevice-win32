@@ -875,6 +875,10 @@ void iDeviceBackup2::ProcessMessage(plist_t message, int *operation_ok) {
 		plist_get_string_val(nn, &str);
 		PRINT_VERBOSE(1, "Content:\n");
 		printf("%s", str);
+		if(cmd == CMD_INFO) {
+			Info = new char[strlen(str) + 1];
+			strcpy(Info, str);
+		}
 		free(str);
 	}
 }

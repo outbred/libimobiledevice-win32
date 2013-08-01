@@ -25,10 +25,11 @@ namespace iMobileDeviceTester
 			//		Console.WriteLine("Progress is {0}", percentage);
 			//	});
 			//MessageBox.Show("here");
-			backuper.Restore(@"G:\trash", null, null, false, true, false, true, (current, total) =>
-				{
-					Debug.WriteLine("Current  is {0}%; total is {1}%", current, total);
-				}, true);
+			//backuper.Restore(@"G:\trash", null, null, false, true, false, true, (current, total) =>
+			//	{
+			//		Debug.WriteLine("Current  is {0}%; total is {1}%", current, total);
+			//	}, true);
+			backuper.UnbackBackup(@"G:\trash");
 			//backuper.Dispose();
 			//Thread.Sleep(1000);
 			//backuper = new ManagedDeviceBackup2();

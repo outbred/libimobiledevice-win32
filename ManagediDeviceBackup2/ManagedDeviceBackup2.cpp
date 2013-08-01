@@ -5,21 +5,87 @@ using namespace msclr::interop;
 
 namespace BackupWrapper {
 
-	int ManagedDeviceBackup2::CancelCallback(const char *notification, void *userdata)
-	{
-		if (!strcmp(notification, NP_SYNC_CANCEL_REQUEST)) {
-			// user cancelled
-		} else if (!strcmp(notification, NP_BACKUP_DOMAIN_CHANGED)) {
-			// wth?
-		} else {
-			// dunno
+	String^ ManagedDeviceBackup2::UnbackBackup(String^ backupDirectory, String^ udid) {
+		if(String::IsNullOrWhiteSpace(backupDirectory)) {
+			throw gcnew ArgumentNullException("backupDirectory");
 		}
-		return 0;
+
+		if(!IO::Directory::Exists(backupDirectory)) {
+			throw gcnew IO::DirectoryNotFoundException(String::Format("Directory {0} does not exist.", backupDirectory));
+		}
+
+		String^ unbackDir = IO::Path::Combine(backupDirectory, "_unback_");
+		if(IO::Directory::Exists(unbackDir)) {
+			throw gcnew ArgumentException(String::Format("{0} already exists. Aborting unback.", unbackDir));
+		}
+
+		try {
+			marshal_context^ context = gcnew marshal_context();
+			Initialize();
+			
+			_deviceBackup = new iDeviceBackup2(context->marshal_as<const char*>(backupDirectory), false, false, NULL, context->marshal_as<const char*>(udid), false, false, false, false, false, NULL, NULL, NULL, false, false, true);
+			_deviceBackup->Runit();
+
+			delete context;
+			if(IO::Directory::Exists(unbackDir)) {
+				return unbackDir;
+			}
+
+			throw gcnew Exception("Unable to unback backup.  Unknown exception.");
+		}
+		catch(...) {
+			throw gcnew Exception("Got a native exception.  Badness.");
+		}
+		finally {
+			Cleanup();
+			DecodeErrors();
+		}
+	}
+
+	// TODO: return a managed class that represents all this serialized info
+	String^ ManagedDeviceBackup2::GetInfoFromLastBackup(String^ backupDirectory) {
+		marshal_context^ context = gcnew marshal_context();
+		if(String::IsNullOrWhiteSpace(backupDirectory)) {
+			throw gcnew ArgumentNullException("backupDirectory");
+		}
+
+		if(!IO::Directory::Exists(backupDirectory)) {
+			throw gcnew IO::DirectoryNotFoundException(String::Format("Directory {0} does not exist.", backupDirectory));
+		}
+
+		try {
+			Initialize();
+			
+			_deviceBackup = new iDeviceBackup2(context->marshal_as<const char*>(backupDirectory), false, false, NULL, NULL, false, false, false, false, false, NULL, NULL, NULL, false, true, false);
+			_deviceBackup->Runit();
+			const char *info = _deviceBackup->GetInfo();
+			return context->marshal_as<String^>(info);
+
+		}
+		catch(...) {
+			throw gcnew Exception("Got a native exception.  Badness.");
+			return nullptr;
+		}
+		finally {
+			delete context;
+			Cleanup();
+			DecodeErrors();
+		}
 	}
 
 	void ManagedDeviceBackup2::Backup(String^ uUid, String^ password, String^ backupDirectoryRoot, Action<Double, Double>^ progressCallback) {
+		if(String::IsNullOrWhiteSpace(backupDirectoryRoot)) {
+			throw gcnew ArgumentNullException("backupDirectory");
+		}
+
+		if(!IO::Directory::Exists(backupDirectoryRoot)) {
+			throw gcnew IO::DirectoryNotFoundException(String::Format("Directory {0} does not exist.", backupDirectoryRoot));
+		}
+
+
 		try {
 			Initialize();
+
 			this->_progressCallback = progressCallback;
 			marshal_context^ context = gcnew marshal_context();
 			
@@ -41,6 +107,15 @@ namespace BackupWrapper {
 
 	void ManagedDeviceBackup2::Restore(String^ backupDirectory, String^ sourceUuid, String^ password, Boolean^ copyFirst, Boolean^ rebootWhenDone, 
 		Boolean^ removeItemsNotRestored, Boolean^ restoreSystemFiles, Action<Double, Double>^ progressCallback, Boolean^ restoreSettings) {
+
+		if(String::IsNullOrWhiteSpace(backupDirectory)) {
+			throw gcnew ArgumentNullException("backupDirectory");
+		}
+
+		if(!IO::Directory::Exists(backupDirectory)) {
+			throw gcnew IO::DirectoryNotFoundException(String::Format("Directory {0} does not exist.", backupDirectory));
+		}
+
 		try {
 			Initialize();
 			this->_progressCallback = progressCallback;

@@ -97,8 +97,6 @@ namespace BackupWrapper {
 					Cleanup();
 				}
 		public:
-			enum class CancellationType { UserCancelled, BackupDomainChanged, Unhandled };
-
 			ManagedDeviceBackup2() {
 				Initialize();
 			}
@@ -106,6 +104,28 @@ namespace BackupWrapper {
 			~ManagedDeviceBackup2() {
 				Cleanup();
 			}
+
+			/*
+			<MBStatus: version=2.4, date=2013-07-29 20:17:10 +0000, backupState=new, snapshotState=finished, fullBackup=0>
+			<MBProperties: version=8.0, systemDomainsVersion=3.0, date=2013-07-29 20:16:58 +0000, encrypted=0, passcodeSet=0, lockdownKey
+			s={ProductType: "iPod2,1", BuildVersion: "8C148", DeviceName: "MPETESTING", UniqueDeviceID: "253ad710236d7228eb42fbbb5c3fc184
+			4716384e", com.apple.Accessibility: {}, com.apple.MobileDeviceCrashCopy: {}, ProductVersion: "4.2.1", com.apple.mobile.data_s
+			ync: {}, com.apple.TerminalFlashr: {}, com.apple.mobile.iTunes.accessories: {}}>
+			<MBDatabaseIndex: version=2.0, count=113>
+			<MBDatabase: version=5.0>
+
+			 Count   Size (B) Domain name
+				45    1523726 HomeDomain
+				 2      18985 KeychainDomain
+				 8      70463 MediaDomain
+				 2      41002 RootDomain
+				 6       3034 SystemPreferencesDomain
+				 2      28738 WirelessDomain
+				65    1685948 Total
+			*/
+			String^ GetInfoFromLastBackup(String^ backupDirectory);
+
+			String^ UnbackBackup(String^ backupDirectory, [System::Runtime::InteropServices::Optional] String^ udid);
 
 			void Backup(
 				[System::Runtime::InteropServices::Optional]
@@ -143,7 +163,6 @@ namespace BackupWrapper {
 			delegate void ProgressCallbackWrapper(uint64_t current, uint64_t total);
 			int Errors;
 			cmd_mode RequestedOperation;
-			int CancelCallback(const char *notification, void *userdata);
 			void Cleanup() {
 				if(_deviceBackup) {
 					Errors = _deviceBackup->GetErrorFlags();
@@ -157,7 +176,6 @@ namespace BackupWrapper {
 
 			void Initialize() {
 				Errors = 0;
-				cancelTask = gcnew CancelTaskCallBack(this, &ManagedDeviceBackup2::CancelCallback);
 				_progressCallback = nullptr;
 				progressWrapper = gcnew ProgressCallbackWrapper(this, &ManagedDeviceBackup2::ReportProgress);
 			}
