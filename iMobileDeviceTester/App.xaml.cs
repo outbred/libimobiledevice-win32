@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,11 +26,23 @@ namespace iMobileDeviceTester
 			//		Console.WriteLine("Progress is {0}", percentage);
 			//	});
 			//MessageBox.Show("here");
-			//backuper.Restore(@"G:\trash", null, null, false, true, false, true, (current, total) =>
+			//G:\iPhone Backup\Brent\Backup\d3e3e8f72853263b496af5c0df545afd998ce238
+			//backuper.UnbackBackup(@"G:\iPhone Backup\Brent\Backup", "d3e3e8f72853263b496af5c0df545afd998ce238");
+			//backuper.Restore(@"G:\iPhone Backup\Brent\Backup", null, null, false, true, false, true, (current, total) =>
 			//	{
 			//		Debug.WriteLine("Current  is {0}%; total is {1}%", current, total);
 			//	}, true);
-			backuper.UnbackBackup(@"G:\trash");
+			string screenshot;
+			backuper.GetScreenshotofDevice(@"G:\trash", null, out screenshot);
+			if (File.Exists(@"G:\trash\temp.plist"))
+			{
+				File.Delete(@"G:\trash\temp.plist");
+			}
+			backuper.GetInfoForConnectedDevice(null, @"G:\trash\temp.plist", false);
+			//if (!File.Exists(plist))
+			//{
+			//	Trace.TraceError("nope");
+			//}
 			//backuper.Dispose();
 			//Thread.Sleep(1000);
 			//backuper = new ManagedDeviceBackup2();

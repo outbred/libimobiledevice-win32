@@ -1,7 +1,56 @@
 #include "iDeviceBackup2.h"
+#include <libimobiledevice/screenshotr.h>
 
 using namespace System;
 using namespace System::Runtime::InteropServices;
+using namespace System::IO;
+
+struct timeval_t {
+	long    tv_sec;         /* seconds */
+	long    tv_usec;        /* and microseconds */
+};
+//typedef timeval_t timeval;
+
+#define FORMAT_KEY_VALUE 1
+#define FORMAT_XML 2
+
+static const char *domains[] = {
+	"com.apple.disk_usage",
+	"com.apple.disk_usage.factory",
+	"com.apple.mobile.battery",
+/* FIXME: For some reason lockdownd segfaults on this, works sometimes though 
+	"com.apple.mobile.debug",. */
+	"com.apple.iqagent",
+	"com.apple.purplebuddy",
+	"com.apple.PurpleBuddy",
+	"com.apple.mobile.chaperone",
+	"com.apple.mobile.third_party_termination",
+	"com.apple.mobile.lockdownd",
+	"com.apple.mobile.lockdown_cache",
+	"com.apple.xcode.developerdomain",
+	"com.apple.international",
+	"com.apple.mobile.data_sync",
+	"com.apple.mobile.tethered_sync",
+	"com.apple.mobile.mobile_application_usage",
+	"com.apple.mobile.backup",
+	"com.apple.mobile.nikita",
+	"com.apple.mobile.restriction",
+	"com.apple.mobile.user_preferences",
+	"com.apple.mobile.sync_data_class",
+	"com.apple.mobile.software_behavior",
+	"com.apple.mobile.iTunes.SQLMusicLibraryPostProcessCommands",
+	"com.apple.mobile.iTunes.accessories",
+	"com.apple.mobile.internal", /**< iOS 4.0+ */
+	"com.apple.mobile.wireless_lockdown", /**< iOS 4.0+ */
+	"com.apple.fairplay",
+	"com.apple.iTunes",
+	"com.apple.mobile.iTunes.store",
+	"com.apple.mobile.iTunes",
+	NULL
+};
+
+static const char base64_str[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char base64_pad = '=';
 
 namespace BackupWrapper {
 
@@ -126,6 +175,8 @@ namespace BackupWrapper {
 			String^ GetInfoFromLastBackup(String^ backupDirectory);
 
 			String^ UnbackBackup(String^ backupDirectory, [System::Runtime::InteropServices::Optional] String^ udid);
+			System::Collections::Generic::List<String^>^ GetConnectedDevicesUdids();
+			bool HasConnectedDevice();
 
 			void Backup(
 				[System::Runtime::InteropServices::Optional]
@@ -157,8 +208,10 @@ namespace BackupWrapper {
 				bool^ restoreSettings);
 
 			Boolean^ ChangePassword(String^ currentPassword, String^ newPassword) { return false; }
-			//TODO: make into a property
-			String^ LastBackupDetails() { return nullptr; }
+			bool^ GetInfoForConnectedDevice(String^ udid, String^ locationForPlist, bool^ simple);
+
+			bool GetScreenshotofDevice(String^ backupDirectory, String^ udid, [Out] String^% filePath );
+
 		private:
 			delegate void ProgressCallbackWrapper(uint64_t current, uint64_t total);
 			int Errors;
@@ -199,5 +252,12 @@ namespace BackupWrapper {
 			ProgressCallbackWrapper^ progressWrapper;
 			Action<Double, Double>^ _progressCallback;
 			iDeviceBackup2* _deviceBackup;
+
+			// BEGIN ideviceinfo support
+			char *base64encode(const unsigned char *buf, size_t size);
+
+			int is_domain_known(char *domain);
+
+			// END
 	};
 }

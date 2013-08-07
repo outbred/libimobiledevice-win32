@@ -203,6 +203,8 @@ public:
 	void SetProgressCallback(progress_t progressCallback) {
 		m_progressCallback = progressCallback;
 	}
+	static int plist_write_to_filename(plist_t plist, const char *filename, enum plist_format_t format);
+	static void buffer_write_to_filename(const char *filename, const char *buffer, uint64_t length);
 private:
 	progress_t m_progressCallback;
 	cmd_mode RequestedOperation;
@@ -303,9 +305,7 @@ private:
 	char* format_size_for_display(uint64_t size);
 	plist_t mobilebackup_factory_info_plist_new(const char* udid, lockdownd_client_t lockdown, afc_client_t afc);
 	void buffer_read_from_filename(const char *filename, char **buffer, uint64_t *length);
-	void buffer_write_to_filename(const char *filename, const char *buffer, uint64_t length);
 	int plist_read_from_filename(plist_t *plist, const char *filename);
-	int plist_write_to_filename(plist_t plist, const char *filename, enum plist_format_t format);
 	int mb2_status_check_snapshot_state(const char *path, const char *udid, const char *matches);
 	void do_post_notification(idevice_t device, const char *notification);
 	void print_progress_real(double progress, int flush);
